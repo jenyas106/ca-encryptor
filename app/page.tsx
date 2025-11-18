@@ -37,15 +37,12 @@ export default function Home() {
   // --- ЛОГІКА WEB WORKER ---
 
   useEffect(() => {
-    // Ініціалізація воркера (лише один раз)
     if (typeof window !== 'undefined' && !workerRef.current) {
         workerRef.current = new Worker('/worker.js');
 
-        // Обробка повідомлень від воркера
         workerRef.current.onmessage = (e) => {
             const { type, result: outputResult, fileName: outputFileName, progress, message, operationId } = e.data;
             
-            // Ігноруємо старі операції
             if (operationId !== currentOperationId.current) return;
             
             if (type === 'progress') {
@@ -54,19 +51,14 @@ export default function Home() {
                 setProgress(100); 
                 
                 if (contentType === 'text') {
-                    // Текстовий результат (Base64 або читабельний текст)
                     setResult(outputResult as string);
                 } else {
-                    // Файловий результат
                     const outputBytes = outputResult as Uint8Array;
                     
                     let finalDownloadName = '';
-
                     if (mode === 'encrypt') {
-                        // Шифрування: беремо зашифровану назву від воркера і додаємо .enc
                         finalDownloadName = outputFileName ? `${outputFileName}.enc` : 'encrypted_file.enc';
                     } else {
-                        // Дешифрування: воркер вже повернув відновлену назву
                         finalDownloadName = outputFileName || 'decrypted_file.bin';
                     }
                     
@@ -74,7 +66,6 @@ export default function Home() {
                     setResult(`Файл успішно оброблено та збережено як: ${finalDownloadName}`); 
                 }
                 
-                // Скидаємо прогрес через секунду
                 setTimeout(() => setProgress(0), 1000); 
 
             } else if (type === 'error') {
@@ -89,7 +80,6 @@ export default function Home() {
         };
     }
     
-    // Очистка
     return () => {
         if (workerRef.current) {
             workerRef.current.terminate();
@@ -100,6 +90,16 @@ export default function Home() {
 
 
   // --- ДОПОМІЖНІ ФУНКЦІЇ ---
+
+  // Функція повного очищення полів (окрім ключа)
+  const resetFields = () => {
+      setText("");
+      setResult("");
+      setFile(null);
+      setFileData(null);
+      setError(null);
+      setProgress(0);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0] || null;
@@ -155,7 +155,6 @@ export default function Home() {
     const dataToSend = contentType === 'text' ? text : fileData;
     const isBinary = contentType === 'file';
     
-    // Логіка підготовки імені файлу для воркера
     let fileNameToSend = '';
     if (isBinary && file) {
         if (mode === 'encrypt') {
@@ -257,7 +256,10 @@ export default function Home() {
       <aside className="w-72 flex-shrink-0 hidden md:block">
         <RuleSidebar 
           currentRule={selectedRule}
-          onRuleChange={setSelectedRule}
+          onRuleChange={(rule) => {
+              setSelectedRule(rule);
+              resetFields(); // Очищаємо все при зміні правила
+          }}
         />
       </aside>
 
@@ -291,7 +293,10 @@ export default function Home() {
                     <div className="flex gap-2">
                         <button
                             type="button"
-                            onClick={() => { setMode("encrypt"); setResult(''); }}
+                            onClick={() => { 
+                                setMode("encrypt"); 
+                                setResult(''); // Тільки очищаємо результат, вхід залишаємо
+                            }}
                             className={`flex-1 py-2 rounded-lg font-medium transition ${mode === 'encrypt' ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                         >
                             🔒 Шифрування
@@ -300,7 +305,7 @@ export default function Home() {
                             type="button"
                             onClick={() => { 
                                 setMode("decrypt"); 
-                                // Якщо є результат і це текст - перекидаємо його на вхід
+                                // ЛОГІКА ПЕРЕКИДАННЯ ТЕКСТУ
                                 if (contentType === 'text' && result) {
                                     setText(result);
                                     setResult('');
@@ -321,14 +326,20 @@ export default function Home() {
                     <div className="flex gap-2">
                         <button
                             type="button"
-                            onClick={() => setContentType("text")}
+                            onClick={() => {
+                                setContentType("text");
+                                resetFields(); // Повне очищення при зміні типу
+                            }}
                             className={`flex-1 py-2 rounded-lg font-medium transition ${contentType === 'text' ? 'bg-gray-600 text-white ring-2 ring-blue-400' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                         >
                             📝 Текст
                         </button>
                         <button
                             type="button"
-                            onClick={() => setContentType("file")}
+                            onClick={() => {
+                                setContentType("file");
+                                resetFields(); // Повне очищення при зміні типу
+                            }}
                             className={`flex-1 py-2 rounded-lg font-medium transition ${contentType === 'file' ? 'bg-gray-600 text-white ring-2 ring-blue-400' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                         >
                             📁 Файл
