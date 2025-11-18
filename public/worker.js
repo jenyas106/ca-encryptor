@@ -47,6 +47,7 @@ function generateKeystream(seed, byteLength, ruleFunc, onProgress) {
   let bitBuffer = [];
   let byteIndex = 0;
   let lastProgress = 0;
+  
   const reportInterval = Math.max(1, Math.floor(byteLength / 50));
 
   while (byteIndex < byteLength) {
@@ -70,7 +71,7 @@ function generateKeystream(seed, byteLength, ruleFunc, onProgress) {
   return keystream;
 }
 
-// --- ХЕЛПЕРИ BASE64 (URL SAFE для імен файлів) ---
+// --- ХЕЛПЕРИ ---
 function bytesToBase64(bytes) {
     let binary = '';
     const len = bytes.byteLength;
@@ -87,16 +88,10 @@ function base64ToBytes(base64) {
     return bytes;
 }
 
-// Заміна символів, щоб назва файлу була валідною (замість / ставимо _)
-function toSafeFileName(base64) {
-    return base64.replace(/\//g, '_').replace(/\+/g, '-');
-}
+// Безпечні назви файлів
+function toSafeFileName(base64) { return base64.replace(/\//g, '_').replace(/\+/g, '-'); }
+function fromSafeFileName(safeBase64) { return safeBase64.replace(/_/g, '/').replace(/-/g, '+'); }
 
-function fromSafeFileName(safeBase64) {
-    return safeBase64.replace(/_/g, '/').replace(/-/g, '+');
-}
-
-// --- УНІВЕРСАЛЬНА ФУНКЦІЯ XOR ---
 function performXor(inputBytes, key, rule, onProgress) {
     const seed = createSeedFromKey(key, CA_WIDTH);
     const ruleFunc = getRuleFunction(rule);
@@ -114,18 +109,16 @@ self.onmessage = function(e) {
     const { data, key, rule, mode, isBinary, fileName, operationId } = e.data;
 
     try {
-        let resultData;
         let resultFileName = null;
-
-        // 1. ОБРОБКА ВМІСТУ ФАЙЛУ / ТЕКСТУ
         let inputBytes;
+
         if (isBinary) {
             inputBytes = data;
         } else {
             inputBytes = (mode === 'encrypt') ? new TextEncoder().encode(data) : base64ToBytes(data);
         }
 
-        // Шифруємо/Дешифруємо основні дані
+        // Основне шифрування (Текст або Вміст файлу)
         const processedBytes = performXor(
             inputBytes, 
             key, 
@@ -133,39 +126,32 @@ self.onmessage = function(e) {
             (p) => self.postMessage({ type: 'progress', progress: p })
         );
 
-        // 2. ОБРОБКА НАЗВИ ФАЙЛУ (Тільки для бінарного режиму)
+        // Шифрування назви файлу (якщо це файл)
         if (isBinary && fileName) {
             if (mode === 'encrypt') {
-                // Шифруємо назву: "photo.jpg" -> Bytes -> XOR -> Base64Safe
                 const nameBytes = new TextEncoder().encode(fileName);
-                // Використовуємо той самий ключ і правило для назви
-                const encryptedNameBytes = performXor(nameBytes, key, rule, null); 
+                const encryptedNameBytes = performXor(nameBytes, key, rule, null);
                 resultFileName = toSafeFileName(bytesToBase64(encryptedNameBytes));
             } else {
-                // Дешифруємо назву: "SafeBase64" -> Bytes -> XOR -> "photo.jpg"
-                // Спочатку прибираємо розширення .enc (це робиться в page.tsx, сюди приходить чисте ім'я)
                 try {
                     const encryptedNameBytes = base64ToBytes(fromSafeFileName(fileName));
                     const decryptedNameBytes = performXor(encryptedNameBytes, key, rule, null);
                     resultFileName = new TextDecoder().decode(decryptedNameBytes);
                 } catch (err) {
-                    // Якщо назва не зашифрована, або пошкоджена - залишаємо як є або ставимо дефолт
-                    console.error("Не вдалося розшифрувати назву", err);
                     resultFileName = "decrypted_file"; 
                 }
             }
         }
 
-        // 3. ФОРМУВАННЯ ВІДПОВІДІ
+        // Формування відповіді
         if (isBinary) {
             self.postMessage({
                 type: 'result',
-                result: processedBytes, // Uint8Array
-                fileName: resultFileName, // Зашифрована або розшифрована назва
+                result: processedBytes,
+                fileName: resultFileName, 
                 operationId
             });
         } else {
-            // Текстовий режим
             const textResult = (mode === 'encrypt') 
                 ? bytesToBase64(processedBytes) 
                 : new TextDecoder().decode(processedBytes);

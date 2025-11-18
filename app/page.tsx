@@ -56,16 +56,20 @@ export default function Home() {
                     setResult(outputResult as string);
                 } else {
                     const outputBytes = outputResult as Uint8Array;
+                    
                     let finalDownloadName = '';
                     if (mode === 'encrypt') {
                         finalDownloadName = outputFileName ? `${outputFileName}.enc` : 'encrypted_file.enc';
                     } else {
                         finalDownloadName = outputFileName || 'decrypted_file.bin';
                     }
+                    
                     downloadCipherFile(outputBytes, finalDownloadName);
                     setResult(`Файл успішно оброблено та збережено як: ${finalDownloadName}`); 
                 }
+                
                 setTimeout(() => setProgress(0), 1000); 
+
             } else if (type === 'error') {
                 setError(`Помилка обробки: ${message}`);
                 setProgress(0);
@@ -77,6 +81,7 @@ export default function Home() {
             setProgress(0);
         };
     }
+    
     return () => {
         if (workerRef.current) {
             workerRef.current.terminate();
@@ -85,7 +90,9 @@ export default function Home() {
     };
   }, [contentType, mode]); 
 
+
   // --- ДОПОМІЖНІ ФУНКЦІЇ ---
+
   const resetFields = () => {
       setText("");
       setResult("");
@@ -103,6 +110,7 @@ export default function Home() {
     
     if (selectedFile) {
       const reader = new FileReader();
+      
       reader.onload = (event) => {
         if (event.target?.result instanceof ArrayBuffer) {
           setFileData(new Uint8Array(event.target.result));
@@ -119,17 +127,23 @@ export default function Home() {
     const blob = new Blob([data as BlobPart], { type: 'application/octet-stream' }); 
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
+    
     link.download = fileName;
     link.href = url;
+    
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
+
+  // --- ГОЛОВНА ФУНКЦІЯ (SUBMIT) ---
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    
     if (progress > 0) return; 
 
     if (!key || (contentType === 'text' && !text) || (contentType === 'file' && !fileData)) {
@@ -138,6 +152,7 @@ export default function Home() {
     }
     
     currentOperationId.current += 1; 
+
     const dataToSend = contentType === 'text' ? text : fileData;
     const isBinary = contentType === 'file';
     
@@ -151,6 +166,7 @@ export default function Home() {
     }
     
     setProgress(1); 
+    
     workerRef.current?.postMessage({
         data: dataToSend,
         key: key,
@@ -163,6 +179,7 @@ export default function Home() {
   };
   
   // --- UI COMPONENTS ---
+  
   const ContentInput = useMemo(() => {
     if (contentType === 'text') {
       return (
@@ -171,7 +188,7 @@ export default function Home() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={8}
-          className="w-full p-4 bg-gray-700 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition font-mono text-sm"
+          className="w-full p-4 bg-gray-700 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition font-mono text-base"
           placeholder={mode === "encrypt" ? "Введіть секретний текст..." : "Вставте Base64 шифротекст..."}
         />
       );
@@ -191,7 +208,9 @@ export default function Home() {
               <p className="mt-2 text-sm text-gray-400">
                 {file ? `${(file.size / 1024).toFixed(2)} KB` : "Будь-який формат (jpg, pdf, mp3, etc.)"}
               </p>
-              {fileData && <p className="text-xs text-green-400 mt-2">✓ Дані завантажено</p>}
+              {fileData && (
+                  <p className="text-xs text-green-400 mt-2">✓ Дані завантажено в пам'ять</p>
+              )}
           </div>
         </div>
       );
@@ -200,6 +219,7 @@ export default function Home() {
   
   const ResultArea = useMemo(() => {
       if (!result) return null;
+
       if (contentType === 'text') {
           return (
             <div className="mt-8">
@@ -221,11 +241,14 @@ export default function Home() {
       } else {
           return (
               <div className="mt-6 p-4 bg-green-900/30 border border-green-600 rounded-lg">
-                  <p className="text-green-400 font-medium flex items-center"><span className="mr-2">✓</span> {result}</p>
+                  <p className="text-green-400 font-medium flex items-center">
+                      <span className="mr-2">✓</span> {result}
+                  </p>
               </div>
           );
       }
   }, [contentType, result]);
+
 
   return (
     <div className="flex min-h-screen bg-gray-900 text-white font-sans relative overflow-hidden">
@@ -239,9 +262,6 @@ export default function Home() {
       )}
 
       {/* === SIDEBAR (Responsive) === */}
-      {/* На десктопі (md:): static, block, translate-0
-         На мобільному: fixed, inset-y-0, z-50, transition-transform
-      */}
       <aside className={`
           fixed inset-y-0 left-0 z-50 w-72 bg-gray-800 shadow-2xl transform transition-transform duration-300 ease-in-out
           md:relative md:translate-x-0 md:shadow-none
@@ -258,8 +278,8 @@ export default function Home() {
           currentRule={selectedRule}
           onRuleChange={(rule) => {
               setSelectedRule(rule);
-              resetFields();
-              setIsSidebarOpen(false); // Закриваємо меню на мобільному після вибору
+              resetFields(); // Очищаємо все при зміні правила
+              setIsSidebarOpen(false); // Закриваємо меню на мобільному
           }}
         />
       </aside>
@@ -306,7 +326,10 @@ export default function Home() {
                     <div className="flex gap-2">
                         <button
                             type="button"
-                            onClick={() => { setMode("encrypt"); setResult(''); }}
+                            onClick={() => { 
+                                setMode("encrypt"); 
+                                setResult(''); // Тільки очищаємо результат, вхід залишаємо
+                            }}
                             className={`flex-1 py-2.5 rounded-lg font-medium text-sm md:text-base transition ${mode === 'encrypt' ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                         >
                             🔒 Шифрування
@@ -315,6 +338,7 @@ export default function Home() {
                             type="button"
                             onClick={() => { 
                                 setMode("decrypt"); 
+                                // ЛОГІКА ПЕРЕКИДАННЯ ТЕКСТУ
                                 if (contentType === 'text' && result) {
                                     setText(result);
                                     setResult('');
@@ -335,14 +359,20 @@ export default function Home() {
                     <div className="flex gap-2">
                         <button
                             type="button"
-                            onClick={() => { setContentType("text"); resetFields(); }}
+                            onClick={() => {
+                                setContentType("text");
+                                resetFields(); // Повне очищення при зміні типу
+                            }}
                             className={`flex-1 py-2.5 rounded-lg font-medium text-sm md:text-base transition ${contentType === 'text' ? 'bg-gray-600 text-white ring-2 ring-blue-400' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                         >
                             📝 Текст
                         </button>
                         <button
                             type="button"
-                            onClick={() => { setContentType("file"); resetFields(); }}
+                            onClick={() => {
+                                setContentType("file");
+                                resetFields(); // Повне очищення при зміні типу
+                            }}
                             className={`flex-1 py-2.5 rounded-lg font-medium text-sm md:text-base transition ${contentType === 'file' ? 'bg-gray-600 text-white ring-2 ring-blue-400' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                         >
                             📁 Файл
@@ -373,8 +403,8 @@ export default function Home() {
                         id="key"
                         value={key}
                         onChange={(e) => setKey(e.target.value)}
-                        className="w-full p-4 pl-10 bg-gray-800 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition text-white placeholder-gray-500"
-                        placeholder="Пароль..."
+                        className="w-full p-4 pl-10 bg-gray-800 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition text-base text-white placeholder-gray-500"
+                        placeholder="Пароль, який знаєте тільки ви..."
                     />
                     <span className="absolute left-3 top-4 text-gray-500">🔑</span>
                 </div>
