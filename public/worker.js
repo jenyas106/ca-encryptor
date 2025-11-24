@@ -3,23 +3,63 @@
 const CA_WIDTH = 101; 
 
 // --- ФУНКЦІЇ ПРАВИЛ ---
-function applyRule30(left, center, right) { return left ^ (center | right); }
 
-function applyRule22(left, center, right) {
-  const pattern = (left << 2) | (center << 1) | right;
-  return (pattern === 4 || pattern === 2 || pattern === 1) ? 1 : 0;
+// Rule 30: Chaos
+function applyRule30(left, center, right) {
+  return left ^ (center | right);
 }
 
-function getRuleFunction(rule) {
-  switch (rule) {
-    case 'R22': return applyRule22;
-    case 'R30': default: return applyRule30;
+// Rule 110: Complexity
+function applyRule110(left, center, right) {
+  const pattern = (left << 2) | (center << 1) | right;
+  return (pattern === 1 || pattern === 2 || pattern === 3 || pattern === 5 || pattern === 6) ? 1 : 0;
+}
+
+// Rule 45: Aggressive Chaos (Class III)
+// Бінарний код: 00101101 -> Активні патерни: 0, 2, 3, 5
+function applyRule45(left, center, right) {
+  const pattern = (left << 2) | (center << 1) | right;
+  // Живі клітини: 000, 010, 011, 101
+  return (pattern === 0 || pattern === 2 || pattern === 3 || pattern === 5) ? 1 : 0;
+}
+
+// Rule 90: Fractal / Linear (Left XOR Right)
+function applyRule90(left, center, right) {
+  return left ^ right;
+}
+
+// --- ВИБІР ПРАВИЛА ---
+
+function getRuleFunction(ruleName) {
+  switch (ruleName) {
+    case 'R110': return applyRule110;
+    case 'R45':  return applyRule45;
+    case 'R90':  return applyRule90;
+    case 'R30': 
+    default: return applyRule30;
   }
 }
 
-function getNextGeneration(current_state, ruleFunc) {
+// --- ГЕНЕРАЦІЯ ПОКОЛІННЯ ---
+
+function getNextGeneration(current_state, ruleName, rowIndex) {
   const width = current_state.length;
   const nextState = new Array(width).fill(0);
+  
+  let ruleFunc;
+  
+  if (ruleName === 'Hybrid') {
+     // Гібрид А (Класичний): 30 + 110
+     ruleFunc = (rowIndex % 2 === 0) ? applyRule30 : applyRule110;
+  } else if (ruleName === 'HybridFast') {
+     // Гібрид Б (Швидкий): 90 + 45
+     // R90 швидко розносить біти, R45 заплутує
+     ruleFunc = (rowIndex % 2 === 0) ? applyRule90 : applyRule45;
+  } else {
+     // Одиночні правила
+     ruleFunc = getRuleFunction(ruleName);
+  }
+
   for (let i = 0; i < width; i++) {
     const left = current_state[(i - 1 + width) % width];
     const center = current_state[i];
@@ -28,6 +68,12 @@ function getNextGeneration(current_state, ruleFunc) {
   }
   return nextState;
 }
+
+// ... (Решта коду worker.js залишається без змін: createSeedFromKey, generateKeystream, performXor, onmessage)
+// Скопіюй нижню частину зі свого попереднього файлу, вона не змінилася.
+// Але якщо треба - я скину повний файл.
+
+// --- ІНІЦІАЛІЗАЦІЯ (SEED) ---
 
 function createSeedFromKey(key, width) {
   const seed = new Array(width).fill(0);
@@ -41,17 +87,21 @@ function createSeedFromKey(key, width) {
 }
 
 // --- ГЕНЕРАЦІЯ ПОТОКУ КЛЮЧА ---
-function generateKeystream(seed, byteLength, ruleFunc, onProgress) {
+
+function generateKeystream(seed, byteLength, ruleName, onProgress) {
   const keystream = new Uint8Array(byteLength);
   let currentState = [...seed];
   let bitBuffer = [];
   let byteIndex = 0;
   let lastProgress = 0;
-  
+  let rowIndex = 0; // Лічильник рядків для гібрида
+
   const reportInterval = Math.max(1, Math.floor(byteLength / 50));
 
   while (byteIndex < byteLength) {
-    currentState = getNextGeneration(currentState, ruleFunc);
+    currentState = getNextGeneration(currentState, ruleName, rowIndex);
+    rowIndex++;
+
     bitBuffer.push(currentState[Math.floor(currentState.length / 2)]);
 
     if (bitBuffer.length === 8) {
@@ -88,14 +138,12 @@ function base64ToBytes(base64) {
     return bytes;
 }
 
-// Безпечні назви файлів
 function toSafeFileName(base64) { return base64.replace(/\//g, '_').replace(/\+/g, '-'); }
 function fromSafeFileName(safeBase64) { return safeBase64.replace(/_/g, '/').replace(/-/g, '+'); }
 
-function performXor(inputBytes, key, rule, onProgress) {
+function performXor(inputBytes, key, ruleName, onProgress) {
     const seed = createSeedFromKey(key, CA_WIDTH);
-    const ruleFunc = getRuleFunction(rule);
-    const keystream = generateKeystream(seed, inputBytes.length, ruleFunc, onProgress);
+    const keystream = generateKeystream(seed, inputBytes.length, ruleName, onProgress);
     
     const outputBytes = new Uint8Array(inputBytes.length);
     for (let i = 0; i < inputBytes.length; i++) {
@@ -118,7 +166,6 @@ self.onmessage = function(e) {
             inputBytes = (mode === 'encrypt') ? new TextEncoder().encode(data) : base64ToBytes(data);
         }
 
-        // Основне шифрування (Текст або Вміст файлу)
         const processedBytes = performXor(
             inputBytes, 
             key, 
@@ -126,7 +173,6 @@ self.onmessage = function(e) {
             (p) => self.postMessage({ type: 'progress', progress: p })
         );
 
-        // Шифрування назви файлу (якщо це файл)
         if (isBinary && fileName) {
             if (mode === 'encrypt') {
                 const nameBytes = new TextEncoder().encode(fileName);
@@ -143,7 +189,6 @@ self.onmessage = function(e) {
             }
         }
 
-        // Формування відповіді
         if (isBinary) {
             self.postMessage({
                 type: 'result',
