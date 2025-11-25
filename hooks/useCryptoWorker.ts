@@ -1,4 +1,3 @@
-// hooks/useCryptoWorker.ts
 import { useState, useRef, useEffect, useCallback } from "react";
 import { type AutomataRule } from "../lib/rule30";
 
@@ -12,64 +11,62 @@ interface WorkerMessage {
   progress?: number;
   message?: string;
   operationId?: number;
+  timeTaken?: string; // Час у мс
 }
 
 export function useCryptoWorker() {
-  // Стан для результатів та прогресу
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [executionTime, setExecutionTime] = useState<string | null>(null);
   
-  // Референси
   const workerRef = useRef<Worker | null>(null);
   const currentOperationId = useRef(0);
+  const lastMode = useRef<Mode>('encrypt'); 
 
-  // Ініціалізація воркера
   useEffect(() => {
     if (typeof window !== 'undefined' && !workerRef.current) {
-      workerRef.current = new Worker('/worker.js');
+      // timestamp для скидання кешу
+      workerRef.current = new Worker(`/worker.js?v=${Date.now()}`);
       
       workerRef.current.onmessage = (e: MessageEvent<WorkerMessage>) => {
-        const { type, result: outputResult, fileName: outputFileName, progress: prog, message, operationId } = e.data;
+        const { type, result: outputResult, fileName: outputFileName, progress: prog, message, operationId, timeTaken } = e.data;
         
-        // Ігноруємо старі запити
         if (operationId !== currentOperationId.current) return;
 
         if (type === 'progress') {
-          setProgress(prog || 0);
+          // Плавне оновлення прогресу
+          setProgress(prev => Math.max(prev, prog || 0));
         } 
         else if (type === 'result') {
           setProgress(100);
-          
+          if (timeTaken) setExecutionTime(timeTaken);
+
           if (typeof outputResult === 'string') {
             setResult(outputResult);
           } else if (outputResult instanceof Uint8Array) {
-             // Логіка скачування файлу
-             handleFileDownload(outputResult, outputFileName || 'file.bin');
-             setResult(`Файл успішно збережено: ${outputFileName}`);
+             let finalDownloadName = '';
+             if (lastMode.current === 'encrypt') {
+                 finalDownloadName = outputFileName ? `${outputFileName}.enc` : 'encrypted_file.enc';
+             } else {
+                 finalDownloadName = outputFileName || 'decrypted_file.bin';
+             }
+             handleFileDownload(outputResult, finalDownloadName);
+             setResult(`File processed successfully: ${finalDownloadName}`);
           }
           
-          setTimeout(() => setProgress(0), 1000);
+          // Скидаємо прогрес через 1.5с
+          setTimeout(() => setProgress(0), 1500);
         } 
         else if (type === 'error') {
-          setError(message || "Невідома помилка");
+          setError(message || "Unknown error occurred");
           setProgress(0);
         }
       };
-
-      workerRef.current.onerror = (err) => {
-        setError(`Помилка воркера: ${err.message}`);
-        setProgress(0);
-      };
     }
-
-    return () => {
-      workerRef.current?.terminate();
-      workerRef.current = null;
-    };
+    return () => { workerRef.current?.terminate(); workerRef.current = null; };
   }, []);
 
-  // Функція запуску (експортуємо її назовні)
   const processData = useCallback((
     data: string | Uint8Array, 
     key: string, 
@@ -80,11 +77,12 @@ export function useCryptoWorker() {
   ) => {
     setError(null);
     setResult("");
-    setProgress(1);
+    setExecutionTime(null);
+    setProgress(1); // Починаємо з 1% для візуальної реакції
     
     currentOperationId.current += 1;
+    lastMode.current = mode;
 
-    // Підготовка імені файлу
     let fileNameToSend = fileName || '';
     if (contentType === 'file' && fileName) {
         if (mode === 'encrypt') {
@@ -105,11 +103,8 @@ export function useCryptoWorker() {
     });
   }, []);
 
-  // Допоміжна функція скачування (внутрішня)
   const handleFileDownload = (data: Uint8Array, name: string) => {
-    // 👇 ВИПРАВЛЕННЯ: додаємо "as any" або "as BlobPart", щоб заспокоїти TS
     const blob = new Blob([data as any], { type: 'application/octet-stream' });
-    
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.download = name;
@@ -117,25 +112,17 @@ export function useCryptoWorker() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
-    // Чистимо пам'ять
     URL.revokeObjectURL(url);
   };
 
-  // Функція скидання станів
   const resetWorkerState = () => {
     setResult("");
     setError(null);
     setProgress(0);
+    setExecutionTime(null);
   };
 
   return {
-    processData,
-    progress,
-    result,
-    setResult, // Експортуємо, щоб можна було очищати вручну
-    error,
-    setError,
-    resetWorkerState
+    processData, progress, result, setResult, error, setError, resetWorkerState, executionTime
   };
 }

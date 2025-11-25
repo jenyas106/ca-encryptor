@@ -1,63 +1,54 @@
 // public/worker.js
 
 const CA_WIDTH = 101; 
+const CA_2D_SIZE = 32;
 
 // --- ФУНКЦІЇ ПРАВИЛ ---
 
-// Rule 30: Chaos
-function applyRule30(left, center, right) {
-  return left ^ (center | right);
+function applyRule30(l, c, r) { return l ^ (c | r); }
+
+// R45: High Diffusion
+function applyRule45(l, c, r) {
+  return ((1^l) & (1^r)) | ((1^l) & c) | (l & (1^c) & r);
 }
 
-// Rule 110: Complexity
-function applyRule110(left, center, right) {
-  const pattern = (left << 2) | (center << 1) | right;
-  return (pattern === 1 || pattern === 2 || pattern === 3 || pattern === 5 || pattern === 6) ? 1 : 0;
-}
+// R86: Asymmetric
+function applyRule86(l, c, r) { return (l | c) ^ r; }
 
-// Rule 45: Aggressive Chaos (Class III)
-// Бінарний код: 00101101 -> Активні патерни: 0, 2, 3, 5
-function applyRule45(left, center, right) {
-  const pattern = (left << 2) | (center << 1) | right;
-  // Живі клітини: 000, 010, 011, 101
-  return (pattern === 0 || pattern === 2 || pattern === 3 || pattern === 5) ? 1 : 0;
-}
+// R90: Linear
+function applyRule90(l, c, r) { return l ^ r; }
 
-// Rule 90: Fractal / Linear (Left XOR Right)
-function applyRule90(left, center, right) {
-  return left ^ right;
-}
+// R110: Complex
+function applyRule110(l, c, r) { return (c & (1^l)) | (c ^ r); }
 
-// --- ВИБІР ПРАВИЛА ---
+// R135: Inverse 120
+function applyRule135(l, c, r) { return ((1^l) & ((1^c) | (1^r))) | (l & c & r); }
 
-function getRuleFunction(ruleName) {
-  switch (ruleName) {
-    case 'R110': return applyRule110;
-    case 'R45':  return applyRule45;
-    case 'R90':  return applyRule90;
-    case 'R30': 
-    default: return applyRule30;
-  }
-}
-
-// --- ГЕНЕРАЦІЯ ПОКОЛІННЯ ---
+// --- ГЕНЕРАЦІЯ 1D ---
 
 function getNextGeneration(current_state, ruleName, rowIndex) {
   const width = current_state.length;
   const nextState = new Array(width).fill(0);
-  
   let ruleFunc;
   
-  if (ruleName === 'Hybrid') {
-     // Гібрид А (Класичний): 30 + 110
-     ruleFunc = (rowIndex % 2 === 0) ? applyRule30 : applyRule110;
-  } else if (ruleName === 'HybridFast') {
-     // Гібрид Б (Швидкий): 90 + 45
-     // R90 швидко розносить біти, R45 заплутує
-     ruleFunc = (rowIndex % 2 === 0) ? applyRule90 : applyRule45;
-  } else {
-     // Одиночні правила
-     ruleFunc = getRuleFunction(ruleName);
+  switch (ruleName) {
+      case 'R30': ruleFunc = applyRule30; break;
+      case 'R45': ruleFunc = applyRule45; break;
+      case 'R90': ruleFunc = applyRule90; break;
+      case 'R110': ruleFunc = applyRule110; break;
+      
+      case 'Hybrid30_45': 
+          ruleFunc = (rowIndex % 2 === 0) ? applyRule30 : applyRule45; 
+          break;
+          
+      case 'HybridTriad': 
+          const mod3 = rowIndex % 3;
+          if (mod3 === 0) ruleFunc = applyRule30;
+          else if (mod3 === 1) ruleFunc = applyRule86;
+          else ruleFunc = applyRule135;
+          break;
+          
+      default: ruleFunc = applyRule30;
   }
 
   for (let i = 0; i < width; i++) {
@@ -69,59 +60,108 @@ function getNextGeneration(current_state, ruleName, rowIndex) {
   return nextState;
 }
 
-// ... (Решта коду worker.js залишається без змін: createSeedFromKey, generateKeystream, performXor, onmessage)
-// Скопіюй нижню частину зі свого попереднього файлу, вона не змінилася.
-// Але якщо треба - я скину повний файл.
+// --- 2D GENERATION ---
+function getNextGeneration2D(grid) {
+    const size = grid.length;
+    const newGrid = Array(size).fill(0).map(() => Array(size).fill(0));
 
-// --- ІНІЦІАЛІЗАЦІЯ (SEED) ---
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            let neighbors = 0;
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const ny = (y + dy + size) % size;
+                    const nx = (x + dx + size) % size;
+                    neighbors += grid[ny][nx];
+                }
+            }
+            const cell = grid[y][x];
+            if (cell === 1 && (neighbors === 2 || neighbors === 3)) {
+                newGrid[y][x] = 1;
+            } else if (cell === 0 && neighbors === 3) {
+                newGrid[y][x] = 1;
+            } else {
+                newGrid[y][x] = 0;
+            }
+        }
+    }
+    return newGrid;
+}
+
+// --- SEED ---
 
 function createSeedFromKey(key, width) {
   const seed = new Array(width).fill(0);
   if (!key) { seed[Math.floor(width / 2)] = 1; return seed; }
+  
   const encoder = new TextEncoder();
   const keyBytes = encoder.encode(key);
+  let val = 0x9E3779B9; 
   for (let i = 0; i < width; i++) {
-    seed[i] = keyBytes[i % keyBytes.length] % 2;
+      val = (val ^ keyBytes[i % keyBytes.length]) * 1664525 + 1013904223;
+      seed[i] = (val >>> 31) & 1; 
   }
   return seed;
 }
 
-// --- ГЕНЕРАЦІЯ ПОТОКУ КЛЮЧА ---
+function create2DSeedFromKey(key, size) {
+    const grid = Array(size).fill(0).map(() => Array(size).fill(0));
+    const flatSeed = createSeedFromKey(key, size * size);
+    let idx = 0;
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            grid[y][x] = flatSeed[idx++];
+        }
+    }
+    return grid;
+}
+
+// --- KEYSTREAM ---
 
 function generateKeystream(seed, byteLength, ruleName, onProgress) {
   const keystream = new Uint8Array(byteLength);
-  let currentState = [...seed];
   let bitBuffer = [];
   let byteIndex = 0;
-  let lastProgress = 0;
-  let rowIndex = 0; // Лічильник рядків для гібрида
+  
+  // Оновлюємо прогрес кожні 1% або мінімум кожні 1024 байти
+  const updateInterval = Math.max(1024, Math.floor(byteLength / 100)); 
+  let nextUpdate = updateInterval;
 
-  const reportInterval = Math.max(1, Math.floor(byteLength / 50));
+  let currentState = Array.isArray(seed[0]) ? null : [...seed];
+  let currentGrid = Array.isArray(seed[0]) ? seed.map(row => [...row]) : null;
+  let rowIndex = 0;
 
   while (byteIndex < byteLength) {
-    currentState = getNextGeneration(currentState, ruleName, rowIndex);
-    rowIndex++;
+    let outputBit = 0;
 
-    bitBuffer.push(currentState[Math.floor(currentState.length / 2)]);
+    if (ruleName === '2D_Life') {
+        currentGrid = getNextGeneration2D(currentGrid);
+        outputBit = currentGrid[Math.floor(CA_2D_SIZE/2)][Math.floor(CA_2D_SIZE/2)];
+    } else {
+        currentState = getNextGeneration(currentState, ruleName, rowIndex);
+        outputBit = currentState[Math.floor(currentState.length / 2)];
+    }
+    
+    rowIndex++;
+    bitBuffer.push(outputBit);
 
     if (bitBuffer.length === 8) {
       keystream[byteIndex] = parseInt(bitBuffer.join(''), 2);
       byteIndex++;
       bitBuffer = [];
 
-      if (onProgress && byteIndex % reportInterval === 0) {
-          const currentProgress = Math.floor((byteIndex / byteLength) * 100);
-          if (currentProgress !== lastProgress) {
-             onProgress(currentProgress);
-             lastProgress = currentProgress;
-          }
+      if (byteIndex >= nextUpdate) {
+          const percent = Math.round((byteIndex / byteLength) * 100);
+          onProgress(percent);
+          nextUpdate += updateInterval;
       }
     }
   }
   return keystream;
 }
 
-// --- ХЕЛПЕРИ ---
+// --- HELPERS ---
 function bytesToBase64(bytes) {
     let binary = '';
     const len = bytes.byteLength;
@@ -142,7 +182,13 @@ function toSafeFileName(base64) { return base64.replace(/\//g, '_').replace(/\+/
 function fromSafeFileName(safeBase64) { return safeBase64.replace(/_/g, '/').replace(/-/g, '+'); }
 
 function performXor(inputBytes, key, ruleName, onProgress) {
-    const seed = createSeedFromKey(key, CA_WIDTH);
+    let seed;
+    if (ruleName === '2D_Life') {
+        seed = create2DSeedFromKey(key, CA_2D_SIZE);
+    } else {
+        seed = createSeedFromKey(key, CA_WIDTH);
+    }
+
     const keystream = generateKeystream(seed, inputBytes.length, ruleName, onProgress);
     
     const outputBytes = new Uint8Array(inputBytes.length);
@@ -152,9 +198,11 @@ function performXor(inputBytes, key, ruleName, onProgress) {
     return outputBytes;
 }
 
-// --- ГОЛОВНА ЛОГІКА ---
+// --- MAIN HANDLER ---
 self.onmessage = function(e) {
     const { data, key, rule, mode, isBinary, fileName, operationId } = e.data;
+    
+    const startTime = performance.now(); // Start Timer
 
     try {
         let resultFileName = null;
@@ -176,37 +224,38 @@ self.onmessage = function(e) {
         if (isBinary && fileName) {
             if (mode === 'encrypt') {
                 const nameBytes = new TextEncoder().encode(fileName);
-                const encryptedNameBytes = performXor(nameBytes, key, rule, null);
+                const encryptedNameBytes = performXor(nameBytes, key, rule, () => {}); 
                 resultFileName = toSafeFileName(bytesToBase64(encryptedNameBytes));
             } else {
                 try {
                     const encryptedNameBytes = base64ToBytes(fromSafeFileName(fileName));
-                    const decryptedNameBytes = performXor(encryptedNameBytes, key, rule, null);
+                    const decryptedNameBytes = performXor(encryptedNameBytes, key, rule, () => {});
                     resultFileName = new TextDecoder().decode(decryptedNameBytes);
                 } catch (err) {
                     resultFileName = "decrypted_file"; 
                 }
             }
         }
+        
+        const endTime = performance.now();
+        const timeTaken = (endTime - startTime).toFixed(2); // Calculate duration
+
+        const message = {
+            type: 'result',
+            operationId,
+            timeTaken, // Send time back
+            fileName: resultFileName
+        };
 
         if (isBinary) {
-            self.postMessage({
-                type: 'result',
-                result: processedBytes,
-                fileName: resultFileName, 
-                operationId
-            });
+            message.result = processedBytes;
         } else {
-            const textResult = (mode === 'encrypt') 
+            message.result = (mode === 'encrypt') 
                 ? bytesToBase64(processedBytes) 
                 : new TextDecoder().decode(processedBytes);
-                
-            self.postMessage({
-                type: 'result',
-                result: textResult,
-                operationId
-            });
         }
+        
+        self.postMessage(message);
 
     } catch (error) {
         self.postMessage({ type: 'error', message: error.message, operationId });

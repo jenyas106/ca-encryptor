@@ -1,3 +1,8 @@
-// lib/rule30.ts
-
-export type AutomataRule = 'R30' | 'R110' | 'R45' | 'R90' | 'Hybrid' | 'HybridFast';
+export type AutomataRule = 
+  | 'R30' 
+  | 'R45' 
+  | 'Hybrid30_45' 
+  | 'HybridTriad' 
+  | 'R90' 
+  | 'R110' 
+  | '2D_Life';
