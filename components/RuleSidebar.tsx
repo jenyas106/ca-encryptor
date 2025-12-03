@@ -1,92 +1,111 @@
 // components/RuleSidebar.tsx
-import { type AutomataRule } from "../lib/rule30";
+import { useState, useEffect } from "react";
 
 interface RuleSidebarProps {
-  currentRule: AutomataRule;
-  onRuleChange: (rule: AutomataRule) => void;
+  currentRule: string;
+  onRuleChange: (rule: string) => void;
 }
 
-interface RuleMeta {
-    rule: AutomataRule;
-    name: string;
-    desc: string;
-    security: 1 | 2 | 3; // 1=Weak, 2=Standard, 3=Strong
-    category: "Recommended" | "Experimental" | "Comparison (Weak)";
-}
-
-const rules: RuleMeta[] = [
-  // RECOMMENDED
-  { rule: 'R30', name: 'Rule 30', desc: 'Standard Chaos (Class 3).', security: 2, category: 'Recommended' },
-  { rule: 'R45', name: 'Rule 45', desc: 'High Diffusion Chaos.', security: 3, category: 'Recommended' },
-  { rule: 'Hybrid30_45', name: 'Hybrid A (30+45)', desc: 'Twin Chaos. High Entropy.', security: 3, category: 'Recommended' },
-  
-  // EXPERIMENTAL
-  { rule: 'HybridTriad', name: 'Hybrid Triad', desc: 'Cycle 30 -> 86 -> 135.', security: 2, category: 'Experimental' },
-  { rule: '2D_Life', name: '2D Game of Life', desc: 'Grid sampling. High latency.', security: 1, category: 'Experimental' },
-
-  // COMPARISON
-  { rule: 'R90', name: 'Rule 90', desc: 'Linear Fractal. For analysis only.', security: 1, category: 'Comparison (Weak)' },
-  { rule: 'R110', name: 'Rule 110', desc: 'Complex (Biased). For analysis only.', security: 1, category: 'Comparison (Weak)' },
+const ruleData = [
+  { 
+    rule: 'XOR-MIX', 
+    name: 'Dual XOR (R30 + R86)'
+  },
+  { 
+    rule: 'TRIPLE-MIX', 
+    name: 'Triple XOR (30+86+101)'
+  },
+  { 
+    rule: 'R30', name: 'Rule 30' 
+  },
+  { 
+    rule: 'Custom', 
+    name: 'Власна комбінація', 
+    description: 'Введіть свої правила.' 
+  },
 ];
 
 export default function RuleSidebar({ currentRule, onRuleChange }: RuleSidebarProps) {
-  const categories = Array.from(new Set(rules.map(r => r.category)));
+  // Локальний стан для кастомного поля
+  const [customInput, setCustomInput] = useState("30 90 45");
+  
+  // Чи обрано зараз Custom?
+  // Якщо currentRule не входить у список пресетів (окрім 'Custom'), значить це кастомний ввід
+  const isCustomActive = currentRule === 'Custom' || !ruleData.some(r => r.rule === currentRule && r.rule !== 'Custom');
 
-  const getSecurityColor = (level: number) => {
-      if (level === 1) return "bg-red-500/20 text-red-400 border-red-500/30";
-      if (level === 2) return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
-      return "bg-green-500/20 text-green-400 border-green-500/30";
+  const handleRadioChange = (ruleKey: string) => {
+    if (ruleKey === 'Custom') {
+        onRuleChange(customInput); // Відправляємо значення з інпуту
+    } else {
+        onRuleChange(ruleKey);
+    }
   };
 
-  const getSecurityLabel = (level: number) => {
-      if (level === 1) return "Weak";
-      if (level === 2) return "Standard";
-      return "Strong";
+  const handleCustomInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setCustomInput(val);
+    // Одразу оновлюємо правило в батьківському компоненті
+    onRuleChange(val);
   };
 
   return (
-    <div className="w-full h-full bg-gray-900 border-r border-gray-700 flex flex-col overflow-y-auto">
-      <div className="p-6 border-b border-gray-700 bg-gray-900 sticky top-0 z-10">
-        <h2 className="text-xl font-bold text-white tracking-tight">
-          CA Algorithm
-        </h2>
-        <p className="text-xs text-gray-400 mt-1">Select generator rule</p>
+    <div className="w-full h-full bg-gray-800 p-4 border-r border-gray-700 shadow-xl flex flex-col overflow-y-auto">
+      <h2 className="text-xl font-semibold mb-6 text-blue-400">
+        Алгоритм
+      </h2>
+      
+      <div className="space-y-3">
+        {ruleData.map((item) => {
+          const isActive = item.rule === 'Custom' ? isCustomActive : currentRule === item.rule;
+          
+          return (
+            <div 
+              key={item.rule} 
+              className={`p-3 rounded-lg cursor-pointer transition duration-150 ease-in-out border ${
+                isActive
+                  ? 'bg-blue-900/40 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' 
+                  : 'bg-gray-700 hover:bg-gray-600 border-transparent'
+              }`}
+              onClick={() => handleRadioChange(item.rule)}
+            >
+              <div className="flex items-center mb-1">
+                  <input
+                    type="radio"
+                    name="automata-rule"
+                    checked={isActive}
+                    onChange={() => handleRadioChange(item.rule)}
+                    className="mr-3 w-4 h-4 text-blue-600 bg-gray-700 border-gray-500 focus:ring-blue-500"
+                  />
+                  <span className={`font-bold ${isActive ? 'text-white' : 'text-gray-200'}`}>
+                      {item.name}
+                  </span>
+              </div>
+              <p className="text-xs text-gray-400 ml-7 leading-relaxed">
+                  {item.description}
+              </p>
+
+              {/* Поле вводу з'являється тільки всередині Custom картки, якщо вона активна */}
+              {item.rule === 'Custom' && isActive && (
+                <div className="mt-3 ml-7 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <input 
+                        type="text" 
+                        value={customInput}
+                        onChange={handleCustomInputChange}
+                        className="w-full p-2 bg-gray-900 border border-gray-600 rounded text-sm text-white font-mono focus:border-blue-400 outline-none placeholder-gray-600"
+                        placeholder="Напр: 30 86 101"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">
+                        Через пробіл (0-255). Кількість = шари XOR.
+                    </p>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       
-      <div className="flex-grow p-4 space-y-6">
-        {categories.map(cat => (
-            <div key={cat}>
-                <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 pl-1">{cat}</h3>
-                <div className="space-y-2">
-                    {rules.filter(r => r.category === cat).map((item) => (
-                        <div 
-                            key={item.rule} 
-                            onClick={() => onRuleChange(item.rule)}
-                            className={`group p-3 rounded-lg cursor-pointer border transition-all duration-200 relative overflow-hidden ${
-                                currentRule === item.rule 
-                                ? 'bg-gray-800 border-blue-500 shadow-lg' 
-                                : 'bg-transparent border-transparent hover:bg-gray-800/50 hover:border-gray-700'
-                            }`}
-                        >
-                            <div className="flex justify-between items-center mb-1">
-                                <span className={`font-medium text-sm ${currentRule === item.rule ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>
-                                    {item.name}
-                                </span>
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${getSecurityColor(item.security)}`}>
-                                    {getSecurityLabel(item.security)}
-                                </span>
-                            </div>
-                            <p className="text-xs text-gray-500 group-hover:text-gray-400 leading-snug pr-1">
-                                {item.desc}
-                            </p>
-                            {currentRule === item.rule && (
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 rounded-l-lg"></div>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
-        ))}
+      <div className="mt-auto pt-4 border-t border-gray-700 text-xs text-gray-500">
+        <p>Active Config: <span className="font-mono text-blue-300 block truncate">{currentRule}</span></p>
       </div>
     </div>
   );
