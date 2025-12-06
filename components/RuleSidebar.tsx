@@ -1,41 +1,76 @@
-// components/RuleSidebar.tsx
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 interface RuleSidebarProps {
   currentRule: string;
   onRuleChange: (rule: string) => void;
 }
 
-const ruleData = [
+// Тип для статусу проходження тестів
+type NistStatus = 'perfect' | 'good' | 'average';
+
+interface RuleItem {
+  rule: string;
+  name: string;
+  nistStatus?: NistStatus;
+}
+
+const ruleData: RuleItem[] = [
+  // --- ІДЕАЛЬНІ КОМБІНАЦІЇ ---
   { 
-    rule: 'XOR-MIX', 
-    name: 'Dual XOR (R30 + R86)'
+    rule: '86 75', 
+    name: 'Rules 86 + 75', 
+    nistStatus: 'perfect'
   },
   { 
-    rule: 'TRIPLE-MIX', 
-    name: 'Triple XOR (30+86+101)'
+    rule: '30 86 75', 
+    name: 'Rules 30 + 86 + 75', 
+    nistStatus: 'perfect'
   },
   { 
-    rule: 'R30', name: 'Rule 30' 
+    rule: '86 75 106', 
+    name: 'Rules 86 + 75 + 106', 
+    nistStatus: 'perfect'
   },
+
+  // --- ХОРОШІ (АЛЕ НЕ ІДЕАЛЬНІ) ---
+  { 
+    rule: '30 86', 
+    name: 'Rules 30 + 86', 
+    nistStatus: 'good'
+  },
+  { 
+    rule: '75 30 86', 
+    name: 'Rules 75 + 30 + 86', 
+    nistStatus: 'good'
+  },
+  
+  // --- З НЮАНСАМИ ---
+  { 
+    rule: '86 75 110', 
+    name: 'Rules 86 + 75 + 110', 
+    nistStatus: 'average'
+  },
+  { 
+    rule: '86 75 45', 
+    name: 'Rules 86 + 75 + 45', 
+    nistStatus: 'average'
+  },
+
+  // --- КОНСТРУКТОР ---
   { 
     rule: 'Custom', 
     name: 'Власна комбінація', 
-    description: 'Введіть свої правила.' 
   },
 ];
 
 export default function RuleSidebar({ currentRule, onRuleChange }: RuleSidebarProps) {
-  // Локальний стан для кастомного поля
   const [customInput, setCustomInput] = useState("30 90 45");
   
-  // Чи обрано зараз Custom?
-  // Якщо currentRule не входить у список пресетів (окрім 'Custom'), значить це кастомний ввід
-  const isCustomActive = currentRule === 'Custom' || !ruleData.some(r => r.rule === currentRule && r.rule !== 'Custom');
+  const isCustomActive = currentRule === 'Custom' || !ruleData.some(r => r.rule === currentRule);
 
   const handleRadioChange = (ruleKey: string) => {
     if (ruleKey === 'Custom') {
-        onRuleChange(customInput); // Відправляємо значення з інпуту
+        onRuleChange(customInput);
     } else {
         onRuleChange(ruleKey);
     }
@@ -44,31 +79,58 @@ export default function RuleSidebar({ currentRule, onRuleChange }: RuleSidebarPr
   const handleCustomInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setCustomInput(val);
-    // Одразу оновлюємо правило в батьківському компоненті
     onRuleChange(val);
   };
 
+  const renderStatusBadge = (status?: NistStatus) => {
+      if (!status) return null;
+      
+      let colorClass = "";
+      let text = "";
+
+      switch (status) {
+          case 'perfect':
+              colorClass = "bg-green-500/20 text-green-400 border-green-500/50";
+              text = "NIST: 100%";
+              break;
+          case 'good':
+              colorClass = "bg-blue-500/20 text-blue-400 border-blue-500/50";
+              text = "NIST: 99%";
+              break;
+          case 'average':
+              colorClass = "bg-yellow-500/20 text-yellow-400 border-yellow-500/50";
+              text = "NIST: ~95%";
+              break;
+      }
+
+      return (
+          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${colorClass} ml-auto`}>
+              {text}
+          </span>
+      );
+  };
+
   return (
-    <div className="w-full h-full bg-gray-800 p-4 border-r border-gray-700 shadow-xl flex flex-col overflow-y-auto">
+    <div className="w-full h-full bg-gray-800 p-4 border-r border-gray-700 shadow-xl flex flex-col overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600">
       <h2 className="text-xl font-semibold mb-6 text-blue-400">
-        Алгоритм
+        Конфігурація (XOR)
       </h2>
       
-      <div className="space-y-3">
+      <div className="space-y-3 pb-4">
         {ruleData.map((item) => {
           const isActive = item.rule === 'Custom' ? isCustomActive : currentRule === item.rule;
           
           return (
             <div 
               key={item.rule} 
-              className={`p-3 rounded-lg cursor-pointer transition duration-150 ease-in-out border ${
+              className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ease-in-out border ${
                 isActive
-                  ? 'bg-blue-900/40 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' 
-                  : 'bg-gray-700 hover:bg-gray-600 border-transparent'
+                  ? 'bg-blue-900/30 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.2)]' 
+                  : 'bg-gray-700/50 hover:bg-gray-700 border-transparent hover:border-gray-600'
               }`}
               onClick={() => handleRadioChange(item.rule)}
             >
-              <div className="flex items-center mb-1">
+              <div className="flex items-center mb-1 w-full h-full">
                   <input
                     type="radio"
                     name="automata-rule"
@@ -76,17 +138,16 @@ export default function RuleSidebar({ currentRule, onRuleChange }: RuleSidebarPr
                     onChange={() => handleRadioChange(item.rule)}
                     className="mr-3 w-4 h-4 text-blue-600 bg-gray-700 border-gray-500 focus:ring-blue-500"
                   />
-                  <span className={`font-bold ${isActive ? 'text-white' : 'text-gray-200'}`}>
+                  <span className={`font-bold text-sm ${isActive ? 'text-white' : 'text-gray-300'}`}>
                       {item.name}
                   </span>
+                  
+                  {renderStatusBadge(item.nistStatus)}
               </div>
-              <p className="text-xs text-gray-400 ml-7 leading-relaxed">
-                  {item.description}
-              </p>
-
-              {/* Поле вводу з'являється тільки всередині Custom картки, якщо вона активна */}
+              
+              {/* Поле для Custom вводу */}
               {item.rule === 'Custom' && isActive && (
-                <div className="mt-3 ml-7 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="mt-3 ml-7 animate-in fade-in slide-in-from-top-1 duration-200">
                     <input 
                         type="text" 
                         value={customInput}
@@ -95,7 +156,7 @@ export default function RuleSidebar({ currentRule, onRuleChange }: RuleSidebarPr
                         placeholder="Напр: 30 86 101"
                     />
                     <p className="text-[10px] text-gray-500 mt-1">
-                        Через пробіл (0-255). Кількість = шари XOR.
+                        Введіть числа від 0 до 255 через пробіл.
                     </p>
                 </div>
               )}
@@ -105,7 +166,7 @@ export default function RuleSidebar({ currentRule, onRuleChange }: RuleSidebarPr
       </div>
       
       <div className="mt-auto pt-4 border-t border-gray-700 text-xs text-gray-500">
-        <p>Active Config: <span className="font-mono text-blue-300 block truncate">{currentRule}</span></p>
+        <p>Active: <span className="font-mono text-blue-300 block truncate">{currentRule}</span></p>
       </div>
     </div>
   );

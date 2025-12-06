@@ -1,9 +1,9 @@
 // public/worker.js
 
+// Ширина автомата 256 біт (безпечний стандарт)
 const CA_WIDTH = 256; 
 
 // --- 1. КРИПТОГРАФІЧНЕ ЗЕРНО (SHA-256) ---
-// Залишаємо це, бо це гарантує надійність шифрування
 async function createSecureSeed(key, width, saltIndex) {
     const encoder = new TextEncoder();
     const dataToHash = encoder.encode(key + `_layer_${saltIndex}_secure`);
@@ -21,7 +21,12 @@ async function createSecureSeed(key, width, saltIndex) {
     return seed;
 }
 
-// --- 2. ЛОГІКА АВТОМАТА ---
+// --- 2. УНІВЕРСАЛЬНА ФУНКЦІЯ ПРАВИЛА ---
+function applyGenericRule(ruleNumber, left, center, right) {
+    const idx = (left << 2) | (center << 1) | right;
+    return (ruleNumber >> idx) & 1;
+}
+
 function getNextGeneration(current_state, ruleNumber) {
     const width = current_state.length;
     const nextState = new Array(width);
@@ -29,10 +34,67 @@ function getNextGeneration(current_state, ruleNumber) {
         const left = current_state[(i - 1 + width) % width];
         const center = current_state[i];
         const right = current_state[(i + 1) % width];
-        const idx = (left << 2) | (center << 1) | right;
-        nextState[i] = (ruleNumber >> idx) & 1;
+        nextState[i] = applyGenericRule(ruleNumber, left, center, right);
     }
     return nextState;
+}
+
+// --- ГЕНЕРАЦІЯ ПОТОКУ (KEYSTREAM) ---
+async function generateKeystream(byteLength, key, rulesArray, onProgress) {
+    const keystream = new Uint8Array(byteLength);
+    
+    const currentStates = await Promise.all(
+        rulesArray.map((_, idx) => createSecureSeed(key, CA_WIDTH, idx))
+    );
+
+    let bitBuffer = 0;
+    let bitsFilled = 0;
+    let lastProgress = 0;
+
+    for (let i = 0; i < byteLength; i++) {
+        let gammaByte = 0;
+        
+        for (let b = 0; b < 8; b++) {
+            let gammaBit = 0;
+            const centerIdx = Math.floor(CA_WIDTH / 2);
+            
+            for (let r = 0; r < currentStates.length; r++) {
+                currentStates[r] = getNextGeneration(currentStates[r], rulesArray[r]);
+                gammaBit ^= currentStates[r][centerIdx];
+            }
+            
+            gammaByte = (gammaByte << 1) | gammaBit;
+        }
+        
+        keystream[i] = gammaByte;
+
+        if (onProgress && i % 5000 === 0) {
+            const p = Math.floor((i / byteLength) * 100);
+            if (p !== lastProgress) {
+                onProgress(p);
+                lastProgress = p;
+            }
+        }
+    }
+    
+    return keystream;
+}
+
+// --- ХЕЛПЕРИ ДЛЯ ІМЕН ФАЙЛІВ ---
+function toSafeBase64(bytes) {
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function fromSafeBase64(str) {
+    str = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (str.length % 4) str += '=';
+    const binary = atob(str);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
 }
 
 // --- ГОЛОВНИЙ ПРОЦЕС ---
@@ -40,19 +102,18 @@ self.onmessage = async function(e) {
     const { data, key, rule, mode, isBinary, fileName, operationId } = e.data;
 
     try {
-        // А. Розпізнаємо правила
         let rulesArray = [];
-        if (rule === 'XOR-MIX') rulesArray = [30, 86];
-        else if (rule === 'TRIPLE-MIX') rulesArray = [30, 86, 101];
-        else if (rule === 'R30') rulesArray = [30];
-        else if (rule === 'R22') rulesArray = [22];
-        else {
-            // Custom
-            rulesArray = rule.toString().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
-            if (!rulesArray.length) rulesArray = [30];
+        if (typeof rule === 'string') {
+             const cleanRule = rule.replace(/[^\d\s,]/g, '');
+             rulesArray = cleanRule.split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+        }
+        
+        if (!rulesArray.length) {
+             if (rule === 'XOR-MIX') rulesArray = [30, 86];
+             else if (rule.includes('30 86 75')) rulesArray = [30, 86, 75];
+             else rulesArray = [30];
         }
 
-        // Б. Підготовка даних
         let inputBytes;
         if (isBinary) {
             inputBytes = data;
@@ -62,56 +123,45 @@ self.onmessage = async function(e) {
                 : Uint8Array.from(atob(data), c => c.charCodeAt(0));
         }
 
-        // В. Ініціалізація станів
-        const currentStates = await Promise.all(
-            rulesArray.map((_, idx) => createSecureSeed(key, CA_WIDTH, idx))
+        const keystream = await generateKeystream(
+            inputBytes.length, 
+            key, 
+            rulesArray, 
+            (p) => self.postMessage({ type: 'progress', progress: p, operationId })
         );
 
         const outputBytes = new Uint8Array(inputBytes.length);
-        
-        let byteIndex = 0;
-        let bitBuffer = 0;
-        let bitsFilled = 0;
-        let lastProgress = 0;
-
-        // Г. Генерація потоку
-        while (byteIndex < inputBytes.length) {
-            let gammaBit = 0;
-            const centerIdx = Math.floor(CA_WIDTH / 2);
-            
-            for (let r = 0; r < currentStates.length; r++) {
-                currentStates[r] = getNextGeneration(currentStates[r], rulesArray[r]);
-                gammaBit ^= currentStates[r][centerIdx];
-            }
-
-            bitBuffer = (bitBuffer << 1) | gammaBit;
-            bitsFilled++;
-
-            if (bitsFilled === 8) {
-                const gammaByte = bitBuffer;
-                
-                // XOR з файлом
-                outputBytes[byteIndex] = inputBytes[byteIndex] ^ gammaByte;
-
-                byteIndex++;
-                bitBuffer = 0;
-                bitsFilled = 0;
-
-                // Оновлення прогресу
-                if (byteIndex % 5000 === 0) {
-                    const p = Math.floor((byteIndex / inputBytes.length) * 100);
-                    if (p !== lastProgress) {
-                        self.postMessage({ type: 'progress', progress: p, operationId });
-                        lastProgress = p;
-                    }
-                }
-            }
+        for (let i = 0; i < inputBytes.length; i++) {
+            outputBytes[i] = inputBytes[i] ^ keystream[i];
         }
 
-        // Д. Відправка результату (БЕЗ аналізу ентропії)
         let resultFileName = null;
+        
         if (isBinary && fileName) {
-             resultFileName = (mode === 'encrypt') ? fileName + ".enc" : fileName.replace(/\.enc$/, '');
+            if (mode === 'encrypt') {
+                const nameBytes = new TextEncoder().encode(fileName);
+                const nameKeystream = await generateKeystream(nameBytes.length, "FILENAME_" + key, rulesArray, null);
+                const encryptedNameBytes = new Uint8Array(nameBytes.length);
+                for(let i=0; i<nameBytes.length; i++) encryptedNameBytes[i] = nameBytes[i] ^ nameKeystream[i];
+                
+                // ВИПРАВЛЕНО: Більше не додаємо .enc тут, це зробить інтерфейс
+                resultFileName = toSafeBase64(encryptedNameBytes); 
+                
+            } else {
+                const cleanName = fileName.replace(/\.enc$/, '');
+                try {
+                    const encryptedNameBytes = fromSafeBase64(cleanName);
+                    const nameKeystream = await generateKeystream(encryptedNameBytes.length, "FILENAME_" + key, rulesArray, null);
+                    
+                    const decryptedNameBytes = new Uint8Array(encryptedNameBytes.length);
+                    for(let i=0; i<encryptedNameBytes.length; i++) decryptedNameBytes[i] = encryptedNameBytes[i] ^ nameKeystream[i];
+                    
+                    resultFileName = new TextDecoder().decode(decryptedNameBytes);
+                } catch (e) {
+                    console.error("Name decryption failed:", e);
+                    resultFileName = "decrypted_file.bin";
+                }
+            }
         }
 
         if (isBinary) {
